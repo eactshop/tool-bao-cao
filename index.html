@@ -1,0 +1,628 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<title>Sổ Doanh Thu — Phân tích đơn hàng Shopee</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+  :root{
+    --paper: #F2ECDC;
+    --paper-dark: #E7DEC6;
+    --ink: #1E2A22;
+    --forest: #24463A;
+    --forest-deep: #17332A;
+    --amber: #C97C2C;
+    --amber-light: #E7A855;
+    --rust: #A8443A;
+    --line: #C6B999;
+    --line-soft: #DCD2B4;
+    --white: #FBF8F0;
+    --shadow: rgba(23,51,42,0.18);
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0;
+    background:var(--paper);
+    color:var(--ink);
+    font-family:'Inter',sans-serif;
+    background-image:
+      radial-gradient(circle at 10% 0%, rgba(36,70,58,0.05), transparent 40%),
+      radial-gradient(circle at 90% 10%, rgba(201,124,44,0.06), transparent 45%);
+    min-height:100vh;
+  }
+  .wrap{max-width:1180px; margin:0 auto; padding:36px 24px 90px;}
+
+  /* ===== Header / cover ===== */
+  .cover{
+    background:linear-gradient(180deg, var(--forest) 0%, var(--forest-deep) 100%);
+    border-radius:18px;
+    padding:38px 40px 34px;
+    color:var(--white);
+    position:relative;
+    overflow:hidden;
+    box-shadow:0 18px 40px -18px var(--shadow);
+  }
+  .cover::before{
+    content:"";
+    position:absolute; inset:0;
+    background-image:repeating-linear-gradient(180deg, rgba(255,255,255,0.035) 0px, rgba(255,255,255,0.035) 1px, transparent 1px, transparent 34px);
+    pointer-events:none;
+  }
+  .eyebrow{
+    font-family:'IBM Plex Mono', monospace;
+    font-size:11.5px;
+    letter-spacing:0.16em;
+    text-transform:uppercase;
+    color:var(--amber-light);
+    display:flex; align-items:center; gap:10px;
+  }
+  .eyebrow::before{content:"§"; font-size:14px;}
+  h1{
+    font-family:'Fraunces', serif;
+    font-weight:600;
+    font-size:clamp(30px, 4vw, 44px);
+    margin:10px 0 8px;
+    letter-spacing:-0.01em;
+  }
+  .cover p{
+    max-width:560px;
+    color:#D9E4DC;
+    font-size:15px;
+    line-height:1.55;
+    margin:0;
+  }
+  .stamp{
+    position:absolute; top:28px; right:34px;
+    border:1.5px solid rgba(231,168,85,0.55);
+    color:var(--amber-light);
+    font-family:'IBM Plex Mono',monospace;
+    font-size:10.5px;
+    letter-spacing:0.12em;
+    text-transform:uppercase;
+    padding:8px 12px;
+    border-radius:5px;
+    transform:rotate(3deg);
+    opacity:0.85;
+  }
+
+  /* ===== Dropzone ===== */
+  .dropzone{
+    margin-top:22px;
+    border:2px dashed rgba(231,168,85,0.45);
+    border-radius:12px;
+    padding:26px 22px;
+    display:flex;
+    align-items:center;
+    gap:18px;
+    cursor:pointer;
+    transition:border-color .2s ease, background .2s ease;
+    background:rgba(255,255,255,0.03);
+  }
+  .dropzone:hover, .dropzone.drag{
+    border-color:var(--amber-light);
+    background:rgba(231,168,85,0.08);
+  }
+  .dz-icon{
+    width:46px; height:46px; flex:none;
+    border-radius:50%;
+    border:1.5px solid var(--amber-light);
+    display:flex; align-items:center; justify-content:center;
+    font-family:'Fraunces',serif; font-size:20px; color:var(--amber-light);
+  }
+  .dz-text b{display:block; font-size:15.5px; color:var(--white); margin-bottom:3px;}
+  .dz-text span{font-size:13px; color:#C7D2C9;}
+  #fileInput{display:none;}
+
+  /* ===== File badges ===== */
+  .files-row{
+    display:flex; flex-wrap:wrap; gap:10px;
+    margin-top:16px;
+  }
+  .file-badge{
+    font-family:'IBM Plex Mono', monospace;
+    font-size:11.5px;
+    background:rgba(255,255,255,0.06);
+    border:1px solid rgba(231,168,85,0.3);
+    color:var(--white);
+    padding:7px 11px 7px 12px;
+    border-radius:999px;
+    display:flex; align-items:center; gap:8px;
+  }
+  .file-badge .dot{width:6px;height:6px;border-radius:50%;background:var(--amber-light);}
+  .file-badge .x{cursor:pointer; opacity:0.6; padding:0 2px;}
+  .file-badge .x:hover{opacity:1; color:var(--rust);}
+
+  /* ===== Empty state ===== */
+  .empty{
+    margin-top:60px;
+    text-align:center;
+    color:#8A7F63;
+    font-family:'IBM Plex Mono', monospace;
+    font-size:13px;
+  }
+  .empty b{display:block; font-family:'Fraunces',serif; font-size:20px; color:var(--forest); font-weight:600; margin-bottom:6px;}
+
+  /* ===== Toolbar ===== */
+  .toolbar{
+    margin-top:34px;
+    display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:14px;
+  }
+  .tabs{display:flex; gap:6px; flex-wrap:wrap;}
+  .tab{
+    font-family:'IBM Plex Mono',monospace;
+    font-size:12px;
+    padding:8px 14px;
+    border-radius:7px;
+    border:1px solid var(--line);
+    background:var(--white);
+    color:var(--forest);
+    cursor:pointer;
+    letter-spacing:0.02em;
+  }
+  .tab.active{background:var(--forest); color:var(--white); border-color:var(--forest);}
+  .controls{display:flex; align-items:center; gap:14px; flex-wrap:wrap;}
+  .toggle-line{
+    display:flex; align-items:center; gap:8px;
+    font-family:'IBM Plex Mono',monospace; font-size:12px; color:var(--forest);
+  }
+  .toggle-line input{accent-color:var(--amber);}
+  .btn{
+    font-family:'IBM Plex Mono',monospace;
+    font-size:12px;
+    border:1px solid var(--forest);
+    background:var(--forest);
+    color:var(--white);
+    padding:9px 16px;
+    border-radius:7px;
+    cursor:pointer;
+    letter-spacing:0.03em;
+  }
+  .btn:hover{background:var(--forest-deep);}
+  .btn.ghost{background:transparent; color:var(--forest);}
+
+  .status-filters{
+    margin-top:10px;
+    display:flex; gap:14px; flex-wrap:wrap;
+    font-family:'IBM Plex Mono',monospace; font-size:11.5px; color:#5B5440;
+  }
+  .status-filters label{display:flex; align-items:center; gap:6px; cursor:pointer;}
+
+  /* ===== KPI cards ===== */
+  .kpis{
+    margin-top:22px;
+    display:grid;
+    grid-template-columns:repeat(auto-fit, minmax(160px,1fr));
+    gap:14px;
+  }
+  .kpi{
+    background:var(--white);
+    border:1px solid var(--line-soft);
+    border-radius:12px;
+    padding:16px 18px;
+    position:relative;
+  }
+  .kpi::before{
+    content:attr(data-tag);
+    position:absolute; top:12px; right:14px;
+    font-family:'IBM Plex Mono',monospace;
+    font-size:9.5px; letter-spacing:0.1em; text-transform:uppercase;
+    color:var(--line);
+  }
+  .kpi .num{
+    font-family:'Fraunces',serif;
+    font-weight:600;
+    font-size:26px;
+    color:var(--forest);
+  }
+  .kpi .num.rust{color:var(--rust);}
+  .kpi .lbl{
+    font-size:12px; color:#7C7255; margin-top:4px;
+  }
+
+  /* ===== Section title ===== */
+  .section-title{
+    margin:36px 0 12px;
+    display:flex; align-items:baseline; gap:10px;
+  }
+  .section-title h2{
+    font-family:'Fraunces',serif; font-weight:600; font-size:20px; margin:0; color:var(--forest);
+  }
+  .section-title .n{
+    font-family:'IBM Plex Mono',monospace; font-size:11px; color:#8A7F63;
+  }
+  .section-title::after{
+    content:""; flex:1; height:1px; background:var(--line-soft);
+  }
+
+  .search{
+    font-family:'IBM Plex Mono',monospace;
+    font-size:12.5px;
+    border:1px solid var(--line);
+    background:var(--white);
+    border-radius:7px;
+    padding:8px 12px;
+    width:220px;
+    color:var(--ink);
+  }
+  .search:focus{outline:none; border-color:var(--amber);}
+
+  /* ===== Table (ledger) ===== */
+  .ledger{
+    background:var(--white);
+    border:1px solid var(--line-soft);
+    border-radius:12px;
+    overflow:hidden;
+  }
+  table{width:100%; border-collapse:collapse;}
+  thead th{
+    text-align:left;
+    font-family:'IBM Plex Mono',monospace;
+    font-size:10.5px;
+    text-transform:uppercase;
+    letter-spacing:0.07em;
+    color:var(--white);
+    background:var(--forest);
+    padding:11px 14px;
+    white-space:nowrap;
+  }
+  thead th.num, tbody td.num{text-align:right;}
+  tbody tr{border-bottom:1px solid var(--line-soft);}
+  tbody tr:last-child{border-bottom:none;}
+  tbody tr:hover{background:#FAF6E8;}
+  tbody td{
+    padding:11px 14px;
+    font-size:13px;
+    vertical-align:middle;
+  }
+  td.name{max-width:360px;}
+  td.name .rank{
+    font-family:'IBM Plex Mono',monospace;
+    font-size:10px; color:var(--amber);
+    margin-right:6px;
+  }
+  td.num{font-family:'IBM Plex Mono',monospace; font-size:12.5px; color:var(--ink);}
+  .bar-cell{width:190px;}
+  .bar-track{
+    height:8px; background:var(--paper-dark); border-radius:4px; overflow:hidden;
+  }
+  .bar-fill{
+    height:100%;
+    background:linear-gradient(90deg, var(--amber) 0%, var(--amber-light) 100%);
+    border-radius:4px;
+  }
+  .pct-label{
+    font-family:'IBM Plex Mono',monospace; font-size:11px; color:#7C7255; margin-top:4px;
+  }
+  tfoot td{
+    padding:12px 14px;
+    font-family:'IBM Plex Mono',monospace;
+    font-size:12.5px;
+    background:var(--paper-dark);
+    font-weight:600;
+    color:var(--forest);
+  }
+
+  footer{
+    margin-top:50px;
+    text-align:center;
+    font-family:'IBM Plex Mono',monospace;
+    font-size:11px;
+    color:#9A9074;
+  }
+
+  @media (max-width:640px){
+    .wrap{padding:20px 14px 60px;}
+    .cover{padding:26px 20px;}
+    .stamp{display:none;}
+    .bar-cell{display:none;}
+    td.name{max-width:180px;}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="cover">
+    <div class="stamp">Đã kiểm ✓ Bản ghi tự động</div>
+    <div class="eyebrow">Sổ theo dõi doanh thu</div>
+    <h1>Phân tích đơn hàng theo sản phẩm</h1>
+    <p>Kéo thả (hoặc chọn) một hay nhiều file "Order-SKU" xuất từ Shopee/BigSeller. Hệ thống tự gộp dữ liệu, tách theo từng gian hàng và tính % doanh thu theo sản phẩm ngay tại trình duyệt — không tải file lên máy chủ nào cả.</p>
+
+    <div class="dropzone" id="dropzone">
+      <div class="dz-icon">↓</div>
+      <div class="dz-text">
+        <b>Thả file .xlsx vào đây, hoặc bấm để chọn</b>
+        <span>Hỗ trợ nhiều file cùng lúc · định dạng export "Order-SKU-all..."</span>
+      </div>
+      <input type="file" id="fileInput" accept=".xlsx,.xls" multiple>
+    </div>
+
+    <div class="files-row" id="filesRow"></div>
+  </div>
+
+  <div id="emptyState" class="empty">
+    <b>Chưa có dữ liệu</b>
+    Tải file lên ở khung phía trên để xem báo cáo.
+  </div>
+
+  <div id="report" style="display:none;">
+
+    <div class="toolbar">
+      <div class="tabs" id="shopTabs"></div>
+      <div class="controls">
+        <label class="toggle-line"><input type="checkbox" id="excludeInvalid" checked> Loại đơn hủy / hoàn tiền</label>
+        <button class="btn ghost" id="exportBtn">↧ Xuất Excel</button>
+      </div>
+    </div>
+    <div class="status-filters" id="statusFilters"></div>
+
+    <div class="kpis" id="kpis"></div>
+
+    <div class="section-title">
+      <h2>Doanh thu theo sản phẩm</h2>
+      <span class="n" id="rowCount"></span>
+      <input class="search" id="searchBox" placeholder="Tìm sản phẩm…">
+    </div>
+
+    <div class="ledger">
+      <table>
+        <thead>
+          <tr>
+            <th style="width:34px;">#</th>
+            <th>Tên sản phẩm</th>
+            <th class="num">SL bán</th>
+            <th class="num">Số đơn</th>
+            <th class="num">Doanh thu</th>
+            <th class="num">% DT</th>
+            <th class="num bar-cell">Tỷ trọng</th>
+          </tr>
+        </thead>
+        <tbody id="tblBody"></tbody>
+        <tfoot id="tblFoot"></tfoot>
+      </table>
+    </div>
+
+    <footer>Tính toán cục bộ trong trình duyệt · Không lưu trữ hay gửi dữ liệu đi bất kỳ đâu</footer>
+  </div>
+
+</div>
+
+<script>
+const COL = {
+  id:'ID đơn hàng', status:'Trạng thái đơn hàng', product:'Tên sản phẩm',
+  qty:'Số lượng', revenue:'Tổng tiền sản phẩm', shop:'Nền tảng gian hàng',
+  time:'Thời gian đặt đơn'
+};
+const DEFAULT_EXCLUDE = ['Đã hủy', 'Trả hàng & Hoàn tiền'];
+
+let allRows = [];       // combined rows from all files, each tagged with __shop, __file
+let loadedFiles = [];   // {name, rows, shop}
+let statusSet = new Set();
+let activeStatusExcludes = new Set(DEFAULT_EXCLUDE);
+let currentShop = '__ALL__';
+let searchTerm = '';
+
+const dropzone = document.getElementById('dropzone');
+const fileInput = document.getElementById('fileInput');
+const filesRow = document.getElementById('filesRow');
+const emptyState = document.getElementById('emptyState');
+const report = document.getElementById('report');
+
+dropzone.addEventListener('click', ()=> fileInput.click());
+['dragenter','dragover'].forEach(ev=>dropzone.addEventListener(ev, e=>{e.preventDefault(); dropzone.classList.add('drag');}));
+['dragleave','drop'].forEach(ev=>dropzone.addEventListener(ev, e=>{e.preventDefault(); dropzone.classList.remove('drag');}));
+dropzone.addEventListener('drop', e=>{ handleFiles(e.dataTransfer.files); });
+fileInput.addEventListener('change', e=> handleFiles(e.target.files));
+
+function handleFiles(fileList){
+  [...fileList].forEach(file=>{
+    if(loadedFiles.some(f=>f.name===file.name)) return;
+    const reader = new FileReader();
+    reader.onload = e=>{
+      try{
+        const wb = XLSX.read(e.target.result, {type:'array'});
+        const ws = wb.Sheets[wb.SheetNames[0]];
+        const json = XLSX.utils.sheet_to_json(ws, {defval:''});
+        const shop = json.length && json[0][COL.shop] ? json[0][COL.shop] : 'Không xác định';
+        json.forEach(r=>{ r.__shop = shop; r.__file = file.name; });
+        loadedFiles.push({name:file.name, rows:json.length, shop});
+        allRows = allRows.concat(json);
+        json.forEach(r=> r[COL.status] && statusSet.add(r[COL.status]));
+        renderFileBadges();
+        renderAll();
+      }catch(err){
+        console.error(err);
+        loadedFiles.push({name:file.name, rows:0, shop:'Lỗi đọc file', error:true});
+        renderFileBadges();
+      }
+    };
+    reader.readAsArrayBuffer(file);
+  });
+}
+
+function removeFile(name){
+  loadedFiles = loadedFiles.filter(f=>f.name!==name);
+  allRows = allRows.filter(r=>r.__file!==name);
+  statusSet = new Set();
+  allRows.forEach(r=> r[COL.status] && statusSet.add(r[COL.status]));
+  renderFileBadges();
+  renderAll();
+}
+
+function renderFileBadges(){
+  filesRow.innerHTML = loadedFiles.map(f=>`
+    <div class="file-badge">
+      <span class="dot"></span>
+      ${f.name} — ${f.error ? 'lỗi định dạng' : (f.rows + ' dòng · ' + f.shop)}
+      <span class="x" onclick="removeFile('${f.name.replace(/'/g,"\\'")}')">✕</span>
+    </div>`).join('');
+}
+
+function parseDate(s){
+  if(!s) return null;
+  const m = String(s).match(/(\d{2})\/(\d{2})\/(\d{4})/);
+  if(!m) return null;
+  return new Date(+m[3], +m[2]-1, +m[1]);
+}
+
+function getShops(){
+  return [...new Set(allRows.map(r=>r.__shop))];
+}
+
+function renderAll(){
+  if(allRows.length===0){
+    emptyState.style.display='block';
+    report.style.display='none';
+    return;
+  }
+  emptyState.style.display='none';
+  report.style.display='block';
+
+  const shops = getShops();
+  if(!shops.includes(currentShop) && currentShop!=='__ALL__') currentShop='__ALL__';
+
+  // tabs
+  const shopTabs = document.getElementById('shopTabs');
+  let tabsHtml = '';
+  if(shops.length>1) tabsHtml += tabBtn('__ALL__', 'Tất cả gian hàng');
+  shops.forEach(s=> tabsHtml += tabBtn(s, s));
+  shopTabs.innerHTML = tabsHtml;
+
+  // status filter checkboxes
+  const sf = document.getElementById('statusFilters');
+  sf.innerHTML = '<span style="opacity:0.7;">Trạng thái:</span>' + [...statusSet].sort().map(s=>{
+    const checked = activeStatusExcludes.has(s) ? '' : 'checked';
+    return `<label><input type="checkbox" data-status="${s}" ${checked} onchange="toggleStatus('${s.replace(/'/g,"\\'")}', this.checked)"> ${s}</label>`;
+  }).join('');
+
+  document.getElementById('excludeInvalid').onchange = (e)=>{
+    activeStatusExcludes = e.target.checked ? new Set(DEFAULT_EXCLUDE) : new Set();
+    renderAll();
+  };
+
+  computeAndRenderReport();
+}
+
+function toggleStatus(status, checked){
+  if(checked) activeStatusExcludes.delete(status);
+  else activeStatusExcludes.add(status);
+  renderAll();
+}
+
+function tabBtn(key, label){
+  const active = currentShop===key ? 'active' : '';
+  return `<button class="tab ${active}" onclick="setShop('${key.replace(/'/g,"\\'")}')">${label}</button>`;
+}
+function setShop(key){ currentShop = key; renderAll(); }
+
+document.getElementById('searchBox').addEventListener('input', e=>{
+  searchTerm = e.target.value.toLowerCase();
+  computeAndRenderReport();
+});
+
+function computeAndRenderReport(){
+  let rows = allRows;
+  if(currentShop!=='__ALL__') rows = rows.filter(r=>r.__shop===currentShop);
+
+  const allValid = rows.filter(r=> !activeStatusExcludes.has(r[COL.status]));
+
+  // KPIs
+  const total = rows.length;
+  const excluded = total - allValid.length;
+  const revenue = allValid.reduce((a,r)=> a + (Number(r[COL.revenue])||0), 0);
+  const uniqueOrders = new Set(allValid.map(r=>r[COL.id])).size;
+  const uniqueProducts = new Set(allValid.map(r=>r[COL.product])).size;
+  const dates = rows.map(r=>parseDate(r[COL.time])).filter(Boolean).sort((a,b)=>a-b);
+  const period = dates.length ? `${fmtDate(dates[0])} → ${fmtDate(dates[dates.length-1])}` : '—';
+  const cancelRate = total ? (excluded/total*100) : 0;
+
+  document.getElementById('kpis').innerHTML = `
+    ${kpiCard('Dòng đơn', total.toLocaleString('vi-VN'), 'total')}
+    ${kpiCard('Đơn hợp lệ', uniqueOrders.toLocaleString('vi-VN'), 'orders')}
+    ${kpiCard('Doanh thu hợp lệ', revenue.toLocaleString('vi-VN'), 'revenue')}
+    ${kpiCard('Số sản phẩm', uniqueProducts.toLocaleString('vi-VN'), 'sku')}
+    ${kpiCard('Tỷ lệ loại trừ', cancelRate.toFixed(1)+'%', 'excl', cancelRate>15)}
+    ${kpiCard('Giai đoạn', period, 'range')}
+  `;
+
+  // group by product
+  const map = new Map();
+  allValid.forEach(r=>{
+    const name = r[COL.product] || '(Không tên)';
+    if(!map.has(name)) map.set(name, {name, qty:0, orders:new Set(), revenue:0});
+    const g = map.get(name);
+    g.qty += Number(r[COL.qty])||0;
+    g.orders.add(r[COL.id]);
+    g.revenue += Number(r[COL.revenue])||0;
+  });
+  let list = [...map.values()].map(g=>({name:g.name, qty:g.qty, orders:g.orders.size, revenue:g.revenue}));
+  list.sort((a,b)=>b.revenue-a.revenue);
+  const totalRev = list.reduce((a,g)=>a+g.revenue,0) || 1;
+
+  let filtered = list;
+  if(searchTerm) filtered = list.filter(g=>g.name.toLowerCase().includes(searchTerm));
+
+  document.getElementById('rowCount').textContent = `${filtered.length} sản phẩm`;
+
+  const maxRev = list.length ? list[0].revenue : 1;
+  document.getElementById('tblBody').innerHTML = filtered.map((g,i)=>{
+    const pct = g.revenue/totalRev*100;
+    const barPct = g.revenue/maxRev*100;
+    return `<tr>
+      <td class="num" style="color:#B3A984;">${i+1}</td>
+      <td class="name">${escapeHtml(g.name)}</td>
+      <td class="num">${g.qty.toLocaleString('vi-VN')}</td>
+      <td class="num">${g.orders.toLocaleString('vi-VN')}</td>
+      <td class="num">${Math.round(g.revenue).toLocaleString('vi-VN')}</td>
+      <td class="num">${pct.toFixed(1)}%</td>
+      <td class="bar-cell"><div class="bar-track"><div class="bar-fill" style="width:${barPct}%"></div></div></td>
+    </tr>`;
+  }).join('') || `<tr><td colspan="7" style="padding:26px; text-align:center; color:#9A9074;">Không tìm thấy sản phẩm phù hợp</td></tr>`;
+
+  document.getElementById('tblFoot').innerHTML = `
+    <tr>
+      <td colspan="2">TỔNG CỘNG</td>
+      <td class="num">${list.reduce((a,g)=>a+g.qty,0).toLocaleString('vi-VN')}</td>
+      <td class="num">${uniqueOrders.toLocaleString('vi-VN')}</td>
+      <td class="num">${Math.round(totalRev).toLocaleString('vi-VN')}</td>
+      <td class="num">100%</td>
+      <td></td>
+    </tr>`;
+
+  window.__lastList = list;
+  window.__lastMeta = {shop:currentShop, revenue:totalRev, orders:uniqueOrders, period};
+}
+
+function kpiCard(label, value, tag, warn){
+  return `<div class="kpi" data-tag="${tag}">
+    <div class="num ${warn?'rust':''}">${value}</div>
+    <div class="lbl">${label}</div>
+  </div>`;
+}
+function fmtDate(d){ return d.toLocaleDateString('vi-VN', {day:'2-digit', month:'2-digit'}); }
+function escapeHtml(s){ return String(s).replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+document.getElementById('exportBtn').addEventListener('click', ()=>{
+  const list = window.__lastList || [];
+  const meta = window.__lastMeta || {};
+  const totalRev = meta.revenue || 1;
+  const data = list.map((g,i)=>({
+    'STT': i+1,
+    'Tên sản phẩm': g.name,
+    'Số lượng bán': g.qty,
+    'Số đơn hàng': g.orders,
+    'Doanh thu': Math.round(g.revenue),
+    '% Doanh thu': +(g.revenue/totalRev*100).toFixed(2)
+  }));
+  const ws = XLSX.utils.json_to_sheet(data);
+  ws['!cols'] = [{wch:5},{wch:60},{wch:12},{wch:12},{wch:14},{wch:12}];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Doanh thu san pham');
+  const shopLabel = (meta.shop==='__ALL__' || !meta.shop) ? 'TatCa' : meta.shop.replace(/[^a-zA-Z0-9]/g,'');
+  XLSX.writeFile(wb, `DoanhThu_${shopLabel}.xlsx`);
+});
+</script>
+</body>
+</html>
