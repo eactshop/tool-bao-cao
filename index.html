@@ -312,6 +312,34 @@
     font-weight:600;
     color:var(--forest);
   }
+  .filter-summary{
+    margin:-2px 0 14px;
+    display:flex; flex-wrap:wrap; gap:10px 22px;
+    align-items:center;
+    background:var(--paper-dark);
+    border:1px solid var(--line-soft);
+    border-radius:9px;
+    padding:10px 16px;
+    font-family:'IBM Plex Mono',monospace;
+    font-size:12px;
+    color:var(--forest);
+  }
+  .filter-summary .fs-tag{
+    font-size:10px;
+    letter-spacing:0.08em;
+    text-transform:uppercase;
+    color:#8A7F63;
+    margin-right:2px;
+  }
+  .filter-summary b{
+    font-family:'Fraunces',serif;
+    font-weight:600;
+    font-size:14.5px;
+    color:var(--forest);
+    margin-right:2px;
+  }
+  .filter-summary .fs-item{display:flex; align-items:baseline; gap:5px;}
+  .filter-summary .fs-pct{color:var(--amber); font-weight:600;}
   .sku-warn{
     margin-top:10px;
     font-family:'IBM Plex Mono',monospace;
@@ -385,6 +413,7 @@
       <span class="n" id="rowCount"></span>
       <input class="search" id="searchBox" placeholder="Tìm theo SKU hoặc tên sản phẩm…">
     </div>
+    <div id="filterSummary"></div>
 
     <div class="ledger">
       <table>
@@ -631,6 +660,17 @@ function computeAndRenderReport(){
 
   document.getElementById('rowCount').textContent = `${filtered.length} SKU`;
 
+  // Recompute from raw rows (not the grouped list) so the order count stays accurate
+  // even when an order contains other SKUs that don't match the current search.
+  const filteredRows = searchTerm
+    ? allValid.filter(r=>{
+        const sku = getSku(r).toLowerCase();
+        const name = String(r[COL.product]||'').toLowerCase();
+        return sku.includes(searchTerm) || name.includes(searchTerm);
+      })
+    : allValid;
+  renderFilterSummary(filteredRows, list.length, filtered.length, totalRev);
+
   const maxRev = list.length ? list[0].revenue : 1;
   document.getElementById('tblBody').innerHTML = filtered.map((g,i)=>{
     const pct = g.revenue/totalRev*100;
@@ -659,6 +699,30 @@ function computeAndRenderReport(){
 
   window.__lastList = list;
   window.__lastMeta = {shop:currentShop, revenue:totalRev, orders:uniqueOrders, period};
+}
+
+function renderFilterSummary(filteredRows, totalSkuCount, filteredSkuCount, grandTotalRev){
+  const el = document.getElementById('filterSummary');
+
+  if(!searchTerm){
+    el.innerHTML = '';
+    return;
+  }
+
+  const qty = filteredRows.reduce((a,r)=> a + (Number(r[COL.qty])||0), 0);
+  const revenue = filteredRows.reduce((a,r)=> a + (Number(r[COL.revenue])||0), 0);
+  const orders = new Set(filteredRows.map(r=>r[COL.id])).size;
+  const pct = grandTotalRev ? (revenue/grandTotalRev*100) : 0;
+
+  el.innerHTML = `
+    <div class="filter-summary">
+      <span class="fs-tag">Kết quả lọc "${escapeHtml(searchTerm)}"</span>
+      <span class="fs-item"><b>${filteredSkuCount}</b>/${totalSkuCount} SKU</span>
+      <span class="fs-item"><b>${qty.toLocaleString('vi-VN')}</b> sản phẩm bán</span>
+      <span class="fs-item"><b>${orders.toLocaleString('vi-VN')}</b> đơn hàng</span>
+      <span class="fs-item"><b>${Math.round(revenue).toLocaleString('vi-VN')}</b> doanh thu</span>
+      <span class="fs-item"><span class="fs-pct">${pct.toFixed(1)}%</span> tổng doanh thu</span>
+    </div>`;
 }
 
 function kpiCard(label, value, tag, warn){
