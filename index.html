@@ -243,7 +243,7 @@
     background:var(--white);
     border-radius:7px;
     padding:8px 12px;
-    width:220px;
+    width:240px;
     color:var(--ink);
   }
   .search:focus{outline:none; border-color:var(--amber);}
@@ -276,11 +276,20 @@
     font-size:13px;
     vertical-align:middle;
   }
-  td.name{max-width:360px;}
+  td.name{max-width:340px;}
   td.name .rank{
     font-family:'IBM Plex Mono',monospace;
     font-size:10px; color:var(--amber);
     margin-right:6px;
+  }
+  td.name .sub{
+    display:block; font-family:'IBM Plex Mono',monospace; font-size:10.5px; color:#9A9074; margin-top:2px;
+  }
+  td.sku{
+    font-family:'IBM Plex Mono',monospace;
+    font-size:12px;
+    color:var(--amber);
+    white-space:nowrap;
   }
   td.num{font-family:'IBM Plex Mono',monospace; font-size:12.5px; color:var(--ink);}
   .bar-cell{width:190px;}
@@ -302,6 +311,16 @@
     background:var(--paper-dark);
     font-weight:600;
     color:var(--forest);
+  }
+  .sku-warn{
+    margin-top:10px;
+    font-family:'IBM Plex Mono',monospace;
+    font-size:11.5px;
+    color:var(--amber-light);
+    background:rgba(231,168,85,0.1);
+    border:1px solid rgba(231,168,85,0.35);
+    border-radius:8px;
+    padding:8px 12px;
   }
 
   footer{
@@ -327,8 +346,8 @@
   <div class="cover">
     <div class="stamp">Đã kiểm ✓ Bản ghi tự động</div>
     <div class="eyebrow">Sổ theo dõi doanh thu</div>
-    <h1>Phân tích đơn hàng theo sản phẩm</h1>
-    <p>Kéo thả (hoặc chọn) một hay nhiều file "Order-SKU" xuất từ Shopee/BigSeller. Hệ thống tự gộp dữ liệu, tách theo từng gian hàng và tính % doanh thu theo sản phẩm ngay tại trình duyệt — không tải file lên máy chủ nào cả.</p>
+    <h1>Phân tích đơn hàng theo SKU</h1>
+    <p>Kéo thả (hoặc chọn) một hay nhiều file "Order-SKU" xuất từ Shopee/BigSeller. Hệ thống tự gộp dữ liệu, tách theo từng gian hàng và tính % doanh thu theo từng SKU ngay tại trình duyệt — không tải file lên máy chủ nào cả.</p>
 
     <div class="dropzone" id="dropzone">
       <div class="dz-icon">↓</div>
@@ -357,13 +376,14 @@
       </div>
     </div>
     <div class="status-filters" id="statusFilters"></div>
+    <div id="skuWarn"></div>
 
     <div class="kpis" id="kpis"></div>
 
     <div class="section-title">
-      <h2>Doanh thu theo sản phẩm</h2>
+      <h2>Doanh thu theo SKU</h2>
       <span class="n" id="rowCount"></span>
-      <input class="search" id="searchBox" placeholder="Tìm sản phẩm…">
+      <input class="search" id="searchBox" placeholder="Tìm theo SKU hoặc tên sản phẩm…">
     </div>
 
     <div class="ledger">
@@ -371,6 +391,7 @@
         <thead>
           <tr>
             <th style="width:34px;">#</th>
+            <th>SKU</th>
             <th>Tên sản phẩm</th>
             <th class="num">SL bán</th>
             <th class="num">Số đơn</th>
@@ -395,6 +416,12 @@ const COL = {
   qty:'Số lượng', revenue:'Tổng tiền sản phẩm', shop:'Nền tảng gian hàng',
   time:'Thời gian đặt đơn'
 };
+// Candidate header names used by different Shopee/BigSeller "Order-SKU" export variants.
+// The first one found in the actual file becomes the SKU column for the whole session.
+const SKU_CANDIDATES = [
+  'SKU phân loại hàng', 'SKU sản phẩm', 'SKU', 'Số SKU sản phẩm',
+  'SKU liên kết', 'Mã SKU', 'Mã sản phẩm', 'Product SKU'
+];
 const DEFAULT_EXCLUDE = ['Đã hủy', 'Trả hàng & Hoàn tiền'];
 
 let allRows = [];       // combined rows from all files, each tagged with __shop, __file
@@ -403,6 +430,8 @@ let statusSet = new Set();
 let activeStatusExcludes = new Set(DEFAULT_EXCLUDE);
 let currentShop = '__ALL__';
 let searchTerm = '';
+let skuColumn = null;   // detected header name for SKU, once known
+let skuMissing = false; // true if no SKU column could be detected in any loaded file
 
 const dropzone = document.getElementById('dropzone');
 const fileInput = document.getElementById('fileInput');
@@ -416,6 +445,17 @@ dropzone.addEventListener('click', ()=> fileInput.click());
 dropzone.addEventListener('drop', e=>{ handleFiles(e.dataTransfer.files); });
 fileInput.addEventListener('change', e=> handleFiles(e.target.files));
 
+function detectSkuColumn(headerKeys){
+  // 1) exact match against known candidate names
+  for(const cand of SKU_CANDIDATES){
+    if(headerKeys.includes(cand)) return cand;
+  }
+  // 2) fallback: any header containing "sku" (case-insensitive)
+  const fuzzy = headerKeys.find(k=> /sku/i.test(k));
+  if(fuzzy) return fuzzy;
+  return null;
+}
+
 function handleFiles(fileList){
   [...fileList].forEach(file=>{
     if(loadedFiles.some(f=>f.name===file.name)) return;
@@ -426,6 +466,11 @@ function handleFiles(fileList){
         const ws = wb.Sheets[wb.SheetNames[0]];
         const json = XLSX.utils.sheet_to_json(ws, {defval:''});
         const shop = json.length && json[0][COL.shop] ? json[0][COL.shop] : 'Không xác định';
+
+        if(!skuColumn && json.length){
+          skuColumn = detectSkuColumn(Object.keys(json[0]));
+        }
+
         json.forEach(r=>{ r.__shop = shop; r.__file = file.name; });
         loadedFiles.push({name:file.name, rows:json.length, shop});
         allRows = allRows.concat(json);
@@ -447,6 +492,7 @@ function removeFile(name){
   allRows = allRows.filter(r=>r.__file!==name);
   statusSet = new Set();
   allRows.forEach(r=> r[COL.status] && statusSet.add(r[COL.status]));
+  if(allRows.length===0){ skuColumn = null; }
   renderFileBadges();
   renderAll();
 }
@@ -469,6 +515,13 @@ function parseDate(s){
 
 function getShops(){
   return [...new Set(allRows.map(r=>r.__shop))];
+}
+
+function getSku(r){
+  if(skuColumn && r[skuColumn]!==undefined && r[skuColumn]!==''){
+    return String(r[skuColumn]).trim();
+  }
+  return '(Không có SKU)';
 }
 
 function renderAll(){
@@ -502,6 +555,11 @@ function renderAll(){
     renderAll();
   };
 
+  const warnEl = document.getElementById('skuWarn');
+  warnEl.innerHTML = !skuColumn
+    ? `<div class="sku-warn">⚠ Không tìm thấy cột SKU trong file đã tải lên. Đang gộp theo tên sản phẩm tạm thời — kiểm tra lại định dạng export nếu cần tách theo SKU.</div>`
+    : '';
+
   computeAndRenderReport();
 }
 
@@ -533,7 +591,7 @@ function computeAndRenderReport(){
   const excluded = total - allValid.length;
   const revenue = allValid.reduce((a,r)=> a + (Number(r[COL.revenue])||0), 0);
   const uniqueOrders = new Set(allValid.map(r=>r[COL.id])).size;
-  const uniqueProducts = new Set(allValid.map(r=>r[COL.product])).size;
+  const uniqueSkus = new Set(allValid.map(r=>getSku(r))).size;
   const dates = rows.map(r=>parseDate(r[COL.time])).filter(Boolean).sort((a,b)=>a-b);
   const period = dates.length ? `${fmtDate(dates[0])} → ${fmtDate(dates[dates.length-1])}` : '—';
   const cancelRate = total ? (excluded/total*100) : 0;
@@ -542,29 +600,36 @@ function computeAndRenderReport(){
     ${kpiCard('Dòng đơn', total.toLocaleString('vi-VN'), 'total')}
     ${kpiCard('Đơn hợp lệ', uniqueOrders.toLocaleString('vi-VN'), 'orders')}
     ${kpiCard('Doanh thu hợp lệ', revenue.toLocaleString('vi-VN'), 'revenue')}
-    ${kpiCard('Số sản phẩm', uniqueProducts.toLocaleString('vi-VN'), 'sku')}
+    ${kpiCard('Số SKU', uniqueSkus.toLocaleString('vi-VN'), 'sku')}
     ${kpiCard('Tỷ lệ loại trừ', cancelRate.toFixed(1)+'%', 'excl', cancelRate>15)}
     ${kpiCard('Giai đoạn', period, 'range')}
   `;
 
-  // group by product
+  // group by SKU (falling back to product name display alongside it)
   const map = new Map();
   allValid.forEach(r=>{
+    const sku = getSku(r);
     const name = r[COL.product] || '(Không tên)';
-    if(!map.has(name)) map.set(name, {name, qty:0, orders:new Set(), revenue:0});
-    const g = map.get(name);
+    const key = sku + '||' + name; // same SKU can map to a product name; keep them paired
+    if(!map.has(key)) map.set(key, {sku, name, qty:0, orders:new Set(), revenue:0});
+    const g = map.get(key);
     g.qty += Number(r[COL.qty])||0;
     g.orders.add(r[COL.id]);
     g.revenue += Number(r[COL.revenue])||0;
   });
-  let list = [...map.values()].map(g=>({name:g.name, qty:g.qty, orders:g.orders.size, revenue:g.revenue}));
+  let list = [...map.values()].map(g=>({sku:g.sku, name:g.name, qty:g.qty, orders:g.orders.size, revenue:g.revenue}));
   list.sort((a,b)=>b.revenue-a.revenue);
   const totalRev = list.reduce((a,g)=>a+g.revenue,0) || 1;
 
   let filtered = list;
-  if(searchTerm) filtered = list.filter(g=>g.name.toLowerCase().includes(searchTerm));
+  if(searchTerm){
+    filtered = list.filter(g=>
+      g.sku.toLowerCase().includes(searchTerm) ||
+      g.name.toLowerCase().includes(searchTerm)
+    );
+  }
 
-  document.getElementById('rowCount').textContent = `${filtered.length} sản phẩm`;
+  document.getElementById('rowCount').textContent = `${filtered.length} SKU`;
 
   const maxRev = list.length ? list[0].revenue : 1;
   document.getElementById('tblBody').innerHTML = filtered.map((g,i)=>{
@@ -572,6 +637,7 @@ function computeAndRenderReport(){
     const barPct = g.revenue/maxRev*100;
     return `<tr>
       <td class="num" style="color:#B3A984;">${i+1}</td>
+      <td class="sku">${escapeHtml(g.sku)}</td>
       <td class="name">${escapeHtml(g.name)}</td>
       <td class="num">${g.qty.toLocaleString('vi-VN')}</td>
       <td class="num">${g.orders.toLocaleString('vi-VN')}</td>
@@ -579,11 +645,11 @@ function computeAndRenderReport(){
       <td class="num">${pct.toFixed(1)}%</td>
       <td class="bar-cell"><div class="bar-track"><div class="bar-fill" style="width:${barPct}%"></div></div></td>
     </tr>`;
-  }).join('') || `<tr><td colspan="7" style="padding:26px; text-align:center; color:#9A9074;">Không tìm thấy sản phẩm phù hợp</td></tr>`;
+  }).join('') || `<tr><td colspan="8" style="padding:26px; text-align:center; color:#9A9074;">Không tìm thấy SKU phù hợp</td></tr>`;
 
   document.getElementById('tblFoot').innerHTML = `
     <tr>
-      <td colspan="2">TỔNG CỘNG</td>
+      <td colspan="3">TỔNG CỘNG</td>
       <td class="num">${list.reduce((a,g)=>a+g.qty,0).toLocaleString('vi-VN')}</td>
       <td class="num">${uniqueOrders.toLocaleString('vi-VN')}</td>
       <td class="num">${Math.round(totalRev).toLocaleString('vi-VN')}</td>
@@ -610,6 +676,7 @@ document.getElementById('exportBtn').addEventListener('click', ()=>{
   const totalRev = meta.revenue || 1;
   const data = list.map((g,i)=>({
     'STT': i+1,
+    'SKU': g.sku,
     'Tên sản phẩm': g.name,
     'Số lượng bán': g.qty,
     'Số đơn hàng': g.orders,
@@ -617,11 +684,11 @@ document.getElementById('exportBtn').addEventListener('click', ()=>{
     '% Doanh thu': +(g.revenue/totalRev*100).toFixed(2)
   }));
   const ws = XLSX.utils.json_to_sheet(data);
-  ws['!cols'] = [{wch:5},{wch:60},{wch:12},{wch:12},{wch:14},{wch:12}];
+  ws['!cols'] = [{wch:5},{wch:22},{wch:50},{wch:12},{wch:12},{wch:14},{wch:12}];
   const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, 'Doanh thu san pham');
+  XLSX.utils.book_append_sheet(wb, ws, 'Doanh thu theo SKU');
   const shopLabel = (meta.shop==='__ALL__' || !meta.shop) ? 'TatCa' : meta.shop.replace(/[^a-zA-Z0-9]/g,'');
-  XLSX.writeFile(wb, `DoanhThu_${shopLabel}.xlsx`);
+  XLSX.writeFile(wb, `DoanhThu_SKU_${shopLabel}.xlsx`);
 });
 </script>
 </body>
